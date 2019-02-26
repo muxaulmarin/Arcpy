@@ -1,5 +1,6 @@
 import os
 
+# Function return a layer, which name u 
 def procentil(layer_name):
 	mxd = arcpy.mapping.MapDocument('CURRENT')
 	layers = arcpy.mapping.ListLayers(mxd)
@@ -30,7 +31,7 @@ for shape_file in shape_files:
 
 shape_files = [i for i in arcpy.ListFeatureClasses() if '_proj' in i]
 	
-for shape_file in shape_files:
+for num_shape,shape_file in enumerate(shape_files):
 	shape_file_name = shape_file
 	arcpy.MakeFeatureLayer_management(shape_file, shape_file_name)
 	arcpy.CreateFeatureclass_management(path_gdb,'temp_1_' + shape_file_name,"POLYGON")
@@ -60,11 +61,14 @@ for shape_file in shape_files:
 						if item0 == select:
 							pixel_list.pop(n0)
 			inCur.insertRow([major_poly_current])
+			print('Шейп:', num_shape, 'из', len(shape_files))
+			print('Stage I', 'Перебрал ', num_poly, 'полигонов из ', len(major_list)) 
 			
 	for cycle in range(2,7):
-		if cycle == 6:
+		if cycle < 6:
+			arcpy.CreateFeatureclass_management(path_gdb,'temp_{}_'.format(cycle) + shape_file_name,"POLYGON")
+		else:
 			arcpy.CreateFeatureclass_management(path_gdb,'FINAL_{}_'.format(cycle) + shape_file_name,"POLYGON")
-		else: arcpy.CreateFeatureclass_management(path_gdb,'temp_{}_'.format(cycle) + shape_file_name,"POLYGON")
 		out_layer = arcpy.mapping.ListLayers(arcpy.mapping.MapDocument('CURRENT'))[1]
 		with arcpy.da.SearchCursor(out_layer,['SHAPE@', 'SHAPE@XY']) as sCur:
 			polygons_list = [[row[0], row[1]] for row in sCur]	
@@ -87,3 +91,6 @@ for shape_file in shape_files:
 							if item0 == select:
 								polygons_list.pop(n0)
 				inCur.insertRow([polygon_current])
+				print('Шейп:', num_shape, 'из', len(shape_files))
+				print('Цикл: 'cycle)
+				print('Stage II', 'Перебрал ', num_poly, 'полигонов из ', len(major_list)) 
