@@ -1,0 +1,89 @@
+import os
+
+def procentil(layer_name):
+	mxd = arcpy.mapping.MapDocument('CURRENT')
+	layers = arcpy.mapping.ListLayers(mxd)
+	for l in layers:
+		if l.name == layer_name:
+			layer = l
+			break
+	with arcpy.da.SearchCursor(layer,['SHAPE@AREA']) as sCur:
+		area_matrix = [row[0] for row in sCur]
+	area_matrix.sort()
+	procentil_80 = area_matrix[int(0.80*(len(area_matrix)+1))]
+	return procentil_80, layer
+	
+def distance_calc(xy_pixel, xy_major):
+	return math.sqrt(( xy_major[0] - xy_pixel[0] )**2 + ( xy_major[1] - xy_pixel[1] )**2)
+
+path_gdb = os.path.join(r'D:\PythonTasks\Tornado_new_folder\Data\Shapes_and_tiffs\auto', 'geodatabase.gdb')
+arcpy.env.workspace = path_gdb
+shape_files = arcpy.ListFeatureClasses()
+union_parameters = [
+					[7000,	15000,	24000,	33000,	41000,	50000],
+					[300,	340,	380,	420,	460,	500]
+					]
+					
+for shape_file in shape_files:
+	shape_file_name = shape_file
+	arcpy.Project_management(shape_file_name, os.path.join(path_gdb, shape_file_name + '_proj'), "PROJCS['WGS_1984_UTM_Zone_44N',GEOGCS['GCS_WGS_1984',DATUM['D_WGS_1984',SPHEROID['WGS_1984',6378137.0,298.257223563]],PRIMEM['Greenwich',0.0],UNIT['Degree',0.0174532925199433]],PROJECTION['Transverse_Mercator'],PARAMETER['False_Easting',500000.0],PARAMETER['False_Northing',0.0],PARAMETER['Central_Meridian',81.0],PARAMETER['Scale_Factor',0.9996],PARAMETER['Latitude_Of_Origin',0.0],UNIT['Meter',1.0]]", '#', "GEOGCS['GCS_WGS_1984',DATUM['D_WGS_1984',SPHEROID['WGS_1984',6378137.0,298.257223563]],PRIMEM['Greenwich',0.0],UNIT['Degree',0.0174532925199433]]", 'NO_PRESERVE_SHAPE', '#', 'NO_VERTICAL')
+
+shape_files = [i for i in arcpy.ListFeatureClasses() if '_proj' in i]
+	
+for shape_file in shape_files:
+	shape_file_name = shape_file
+	arcpy.MakeFeatureLayer_management(shape_file, shape_file_name)
+	arcpy.CreateFeatureclass_management(path_gdb,'temp_1_' + shape_file_name,"POLYGON")
+	procentil_80, layer = procentil(shape_file_name)
+	
+	with arcpy.da.SearchCursor(layer,['SHAPE@', 'SHAPE@AREA', 'SHAPE@XY']) as sCur:
+		major_list = [[row[0], row[2]] for row in sCur if row[1] >= procentil_80]	
+	with arcpy.da.SearchCursor(layer,['SHAPE@', 'SHAPE@AREA', 'SHAPE@XY']) as sCur:
+		pixel_list = [[row[0], row[2]] for row in sCur if row[1] < procentil_80]
+	out_layer = arcpy.mapping.ListLayers(arcpy.mapping.MapDocument('CURRENT'))[0]
+	
+	with arcpy.da.InsertCursor(out_layer, ['SHAPE@']) as inCur:
+		for num_poly, major_poly in enumerate(major_list):
+			xy_major = major_poly[1]
+			major_poly_current = major_poly[0]
+			selection_list = [0]
+			pixel_list_for_major_poly = [ pixel_poly[0] for pixel_poly in pixel_list if distance_calc(xy_major, pixel_poly[1]) < union_parameters[0][1]]
+			while len(selection_list) != 0:
+				selection_list = [ mini_pixel_poly for mini_pixel_poly in pixel_list_for_major_poly if major_poly_current.distanceTo(mini_pixel_poly) <= union_parameters[1][1]]
+				for select in selection_list:
+					poly_new = major_poly_current.union(select)
+					major_poly_current = poly_new
+					for n,item in enumerate(pixel_list_for_major_poly):
+						if item == select:
+							pixel_list_for_major_poly.pop(n)
+					for n0,item0 in enumerate(pixel_list):
+						if item0 == select:
+							pixel_list.pop(n0)
+			inCur.insertRow([major_poly_current])
+			
+	for cycle in range(2,7):
+		if cycle == 6:
+			arcpy.CreateFeatureclass_management(path_gdb,'FINAL_{}_'.format(cycle) + shape_file_name,"POLYGON")
+		else: arcpy.CreateFeatureclass_management(path_gdb,'temp_{}_'.format(cycle) + shape_file_name,"POLYGON")
+		out_layer = arcpy.mapping.ListLayers(arcpy.mapping.MapDocument('CURRENT'))[1]
+		with arcpy.da.SearchCursor(out_layer,['SHAPE@', 'SHAPE@XY']) as sCur:
+			polygons_list = [[row[0], row[1]] for row in sCur]	
+		final_layer = arcpy.mapping.ListLayers(arcpy.mapping.MapDocument('CURRENT'))[0]
+		with arcpy.da.InsertCursor(final_layer, ['SHAPE@']) as inCur:
+			for num_poly, polygon in enumerate(polygons_list):
+				xy_polygon = polygon[1]
+				polygon_current = polygon[0]
+				selection_list = [0]
+				polygons_remaining = [polygon[0] for polygon in polygons_list if (distance_calc(xy_polygon, polygon[1]) < union_parameters[0][cycle] and polygon_current != polygon[0]) ]
+				while len(selection_list) != 0:
+					selection_list = [ polygon_remaining for polygon_remaining in polygons_remaining if polygon_current.distanceTo(polygon_remaining) <= union_parameters[1][cycle]]
+					for select in selection_list:
+						poly_new = polygon_current.union(select)
+						polygon_current = poly_new
+						for n,item in enumerate(polygons_remaining):
+							if item == select:
+								polygons_remaining.pop(n)
+						for n0,item0 in enumerate(polygons_list):
+							if item0 == select:
+								polygons_list.pop(n0)
+				inCur.insertRow([polygon_current])
